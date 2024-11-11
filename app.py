@@ -8,57 +8,67 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-api_key = os.getenv('API_KEY')
 
 app = Flask(__name__)
-r = redis.Redis()
+
+redis_host = os.getenv('REDIS_HOST', 'localhost')
+redis_port = os.getenv('REDIS_PORT', 6379)
+redis_password = os.getenv('REDIS_PASSWORD', None)
+r = redis.Redis(host=redis_host, 
+                port=redis_port, 
+                password=redis_password,
+                decode_responses=True)
+
+api_key = os.getenv('API_KEY')
+if not api_key:
+    raise ValueError('API_KEY environment variable is not set')
 
 
 def get_weather_service(location):
     endpoint = f'https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/{location}?key={api_key}'
 
-    # try:
-    responce = req.urlopen(endpoint)
-    content = responce.read()
-    json_data = json.loads(content)
+    try:
+        responce = req.urlopen(endpoint)
+        content = responce.read()
+        json_data = json.loads(content)
 
-    if json_data and len(json_data) > 0:
-        temperature = (int(json_data['days'][0]['temp']) - 32) * 5 / 9
+        if json_data and len(json_data) > 0:
+            temperature = (int(json_data['days'][0]['temp']) - 32) * 5 / 9
 
-        data = {'city': json_data['resolvedAddress'],
-                'temperature': f'{(temperature):.1f}',
-                'weather': json_data['days'][0]['description'],
-                'humidity': json_data['days'][0]['humidity'],
-                'wind_speed': json_data['days'][0]['windspeed']}
-        return data
-    #     else:
-    #         logging.error("Invalid JSON response or missing data")
-    #         return None
-    # except err.URLError as e:
-    #     logging.error(f"Request failed: {e}")
-    #     return None
-    # except json.JSONDecodeError as e:
-    #     logging.error(f"JSON decoding failed: {e}")
-    #     return None
-    # except KeyError as e:
-    #     logging.error(f"KeyError: {e} not found in JSON response")
-    # except Exception as e:
-    #     logging.error(f"An unexpected error occurred: {e}")
-    #     return None
+            data = {'city': json_data['resolvedAddress'],
+                    'temperature': f'{(temperature):.1f}',
+                    'weather': json_data['days'][0]['description'],
+                    'humidity': json_data['days'][0]['humidity'],
+                    'wind_speed': json_data['days'][0]['windspeed']}
+            return data
+        else:
+            logging.error("Invalid JSON response or missing data")
+            return None
+    except err.URLError as e:
+        logging.error(f"Request failed: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logging.error(f"JSON decoding failed: {e}")
+        return None
+    except KeyError as e:
+        logging.error(f"KeyError: {e} not found in JSON response")
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        return None
 
 
 def get_weather_cache(location):
     if location:
-        hash = r.hgetall(location)
-        data = {key.decode('utf-8'): value.decode('utf-8') 
-                for key, value in hash.items()}
-        return data
+        return r.hgetall(location)
+    return None
 
 
 def store_weather_cache(location, data):
-    r.hset(location, mapping=data)
-    r.expire(location, 43200)
-    r.close()
+    if data and isinstance(data, dict):
+        r.hset(location, mapping=data)
+        r.expire(location, 43200)
+    else:
+        logging.warning(f"No data to store in cache for location: {location}")
 
 
 @app.route('/', methods=['GET'])
@@ -69,7 +79,6 @@ def main():
         return render_template(template, city=None)
     if location != '':
         data = get_weather_cache(location)
-        r.close()
         if not data:
             data = get_weather_service(location)
             store_weather_cache(location, data)
