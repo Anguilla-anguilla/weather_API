@@ -1,4 +1,6 @@
 from flask import Flask, render_template, request
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import json
 import logging
 import urllib.request as req
@@ -18,6 +20,11 @@ r = redis.Redis(host=redis_host,
                 port=redis_port, 
                 password=redis_password,
                 decode_responses=True)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=['100 per day', '10 per hour'])
 
 api_key = os.getenv('API_KEY')
 if not api_key:
@@ -72,6 +79,7 @@ def store_weather_cache(location, data):
 
 
 @app.route('/', methods=['GET'])
+@limiter.limit('10 per minute')
 def main():
     template = 'base.html'
     location = request.args.get('city')
